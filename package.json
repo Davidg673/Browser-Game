@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "@types/three": "^0.185.1",
+    "dat.gui": "^0.7.9",
+    "oimo": "^1.0.9",
+    "stats.js": "^0.17.0",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "vite": "^8.2.0"
+  }
+}
