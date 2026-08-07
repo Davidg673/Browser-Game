@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
     "@types/three": "^0.185.1",
     "dat.gui": "^0.7.9",
     "oimo": "^1.0.9",
@@ -7,6 +8,8 @@
     "three": "^0.185.1"
   },
   "devDependencies": {
+    "@dimforge/rapier3d": "^0.19.3",
+    "@dimforge/rapier3d-compat": "^0.19.3",
     "vite": "^8.2.0"
   }
 }
