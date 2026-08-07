@@ -8,18 +8,18 @@ import { RapierDebugRenderer } from './rapierDebugRenderer';
 import RAPIER from '@dimforge/rapier3d-compat'
 import { PointerLockControls, TrackballControls } from 'three/examples/jsm/Addons.js';
 import { MOUSE1, W } from './utils';
+import { FirstPersonControls } from 'three/addons/controls/FirstPersonControls.js';
 
 //SCENE
 const scene = new Three.Scene();
 scene.background = new Three.Color(0xa8def0);
+const loader = new GLTFLoader();
 
 //CAMERA
-const camera = new Three.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); 
-const loader = new GLTFLoader();
-camera.position.z = 5;
-camera.position.y = 5;
-camera.position.x = 0;
-scene.add(camera);
+const camera = new Three.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100000); 
+const cameraPivot = new Three.Object3D();
+cameraPivot.name = "camPivot";
+camera.position.set(0, 1, -5);
 //RENDERER
 const renderer = new Three.WebGLRenderer();
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -31,13 +31,13 @@ const ambientLight = new Three.AmbientLight(0x333333);
 scene.add(ambientLight);
 
 //CONTROLS
-const orbitControls = new TrackballControls(camera, renderer.domElement);
+const orbitControls = new OrbitControls(camera, renderer.domElement);
 orbitControls.minDistance = 5;
 orbitControls.maxDistance = 5;
 orbitControls.minZoom = 1;
 orbitControls.maxZoom = 2;
-//orbitControls.maxPolarAngle = Math.PI /2 - 0.05; //Math.PI / 2  for equator
 orbitControls.update();
+
 
 
 //CONTROL KEYS
@@ -124,9 +124,10 @@ import("@dimforge/rapier3d-compat").then(RAPIER => {
 
     const JETDIMENSIONS = {x: 1.1, y:0.2, z:1.6};
 
-    const bodyBuilder = new RAPIER.RigidBodyDesc(RAPIER.RigidBodyType.KinematicVelocityBased).setTranslation(0,0,0)
+    const bodyBuilder = new RAPIER.RigidBodyDesc(RAPIER.RigidBodyType.Dynamic).setTranslation(0,300,0)
     let rigidBody = world.createRigidBody(bodyBuilder);
-    let collider = RAPIER.ColliderDesc.cuboid(JETDIMENSIONS.x, JETDIMENSIONS.y, JETDIMENSIONS.z).setDensity(0);
+    let collider = RAPIER.ColliderDesc.cuboid(JETDIMENSIONS.x, JETDIMENSIONS.y, JETDIMENSIONS.z)
+        .setActiveCollisionTypes(RAPIER.ActiveCollisionTypes.DEFAULT | RAPIER.ActiveCollisionTypes.KINEMATIC_KINEMATIC);
 
     world.createCollider(collider, rigidBody);
 
@@ -159,15 +160,17 @@ import("@dimforge/rapier3d-compat").then(RAPIER => {
             jet.update(dt, keysPressed, mouse);
         }
 
-        
+        world.forEachCollider((collider) =>{
+
+        });
 
         orbitControls.update();
-        renderer.render(scene, camera);
-
         controls.update(dt);
         clock.update();
         stats.end();
         rapierDebugger.update();
+
+        renderer.render(scene, camera);
         setTimeout(gameLoop, FPS);
     };
 
