@@ -1,30 +1,33 @@
 import * as Three from 'three';
 import { OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import { A, CONTROL, D, DIRECTIONS, E, MOUSE1, Q, S, SHIFT, SPACE, W } from './utils';
-import { debug, sqrt } from 'three/tsl';
+import { debug, mix, sqrt } from 'three/tsl';
 import RAPIER from '@dimforge/rapier3d-compat'
 import { FirstPersonControls, TrackballControls } from 'three/examples/jsm/Addons.js';
 
 export class Jet{
 
-    model:  Three.Group;
-    rigidBody: RAPIER.RigidBody; 
-    mixer: Three.AnimationMixer;
-    animationsMap: Map<string, Three.AnimationAction> = new Map(); //idle, jet on
-    orbitControls: OrbitControls;
-    camera: Three.Camera;
-    cameraPivot: Three.Object3D | null;
+    world?: RAPIER.World;
+    model?:  Three.Group;
+    rigidBody?: RAPIER.RigidBody;  
+    bulletMap?: Set<number>; //Set of currently active bullets as collider handles. used to identify in collision events 
+    mixer?: Three.AnimationMixer;
+    animationsMap?: Map<string, Three.AnimationAction>; //idle, jet on
+    orbitControls?: OrbitControls;
+    camera?: Three.Camera;
 
     //state
-    currentAction: string;
+    currentAction?: string;
     cameraOffset = new Three.Vector3(0, 1, -5);
     cameraRotation = new Three.Quaternion();
     //data
     lookDir: Three.Vector3 = new Three.Vector3();
+    shootCooldown: number = 0.05;
+    currentCooldown: number = 0;
     //constants
     fadeDuration: number = 0.2;
     minVelocity = 10;
-    maxVelocity = 20; 
+    maxVelocity = 200; 
     velocityToSet = 0;
     velocityIncrement = 0.5;
     orbitTarget = new Three.Vector3();
@@ -32,53 +35,125 @@ export class Jet{
     xAxis = new Three.Vector3(1,0,0);
     zAxis = new Three.Vector3(0,0,1);
 
+    static Builder = class {
+            _world?: RAPIER.World;
+            _model?:  Three.Group;
+            _rigidBody?: RAPIER.RigidBody; 
+            _mixer?: Three.AnimationMixer;
+            _animationsMap?: Map<string, Three.AnimationAction>; //idle, jet on
+            _orbitControls?: OrbitControls;
+            _camera?: Three.Camera;
+            _currentAction: string = "";
 
-    constructor(model: Three.Group,rigidBody: RAPIER.RigidBody , mixer: Three.AnimationMixer, 
-        animationsMap: Map<string, Three.AnimationAction>, orbitControls: OrbitControls ,
-        camera: Three.Camera, currentAction: string, 
+            public setWorld(world: RAPIER.World){
+                this._world = world;
+                return this;
+            }
+            
+            public setModel(model: Three.Group){
+                this._model = model;
+                return this;
+            }
+
+            public setRigidBody(rb: RAPIER.RigidBody){
+                this._rigidBody = rb;
+                return this;
+            }
+
+            public setMixer(mixer: Three.AnimationMixer){
+                this._mixer = mixer;
+                return this;    
+            }
+
+            public setAnimationsMap(map: Map<string, Three.AnimationAction>){
+                this._animationsMap = map;
+                return this;
+            }
+            
+            public setOrbitConrols(controls: OrbitControls){
+                this._orbitControls = controls;
+                return this;
+            }
+
+            public setCamera(camera: Three.Camera){
+                this._camera = camera;
+                return this;
+            }
+
+            public setCurrentAction(action: string)
+            {
+                this._currentAction = this._currentAction;
+                return this;
+            }
+
+            build()
+            {
+                const jet: Jet = new Jet(
+                    this._world,
+                    this._model,
+                    this._rigidBody,
+                    this._mixer,
+                    this._animationsMap,
+                    this._orbitControls,
+                    this._camera,
+                    this._currentAction
+                )
+                return jet;
+            }
+    }
+
+    constructor(world?: RAPIER.World ,model?: Three.Group,rigidBody?: RAPIER.RigidBody, mixer?: Three.AnimationMixer, 
+        animationsMap?: Map<string, Three.AnimationAction>, orbitControls?: OrbitControls ,
+        camera?: Three.Camera, currentAction?: string
     )
     {
+        this.world = world;
         this.model = model;
         this.rigidBody = rigidBody;
+        this.bulletMap = new Set<number>();
         this.mixer = mixer;
         this.animationsMap = animationsMap;
         this.orbitControls = orbitControls;
         this.camera = camera;
         this.currentAction = currentAction;
-        this.animationsMap.forEach((value, key) => {
+        this.animationsMap?.forEach((value, key) => {
             if (key == currentAction)
             {
                 value.play();
             }
         });
-        this.cameraPivot = camera.parent;
     }
+
 
     public update(delta: number, keysPressed: any, mouse: Three.Vector2)
     {
+        if (!this.rigidBody || !this.orbitControls) return;
 
         this.animate(delta, keysPressed);
 
 
-        let position = this.rigidBody.translation();
+        let position = this.rigidBody.translation(); // get position from rigidbody
         
-        this.model.getWorldDirection(this.lookDir).normalize();
-        this.model.position.set(position.x, position.y - 0.15, position.z);
+        this.model?.getWorldDirection(this.lookDir).normalize(); //Store facing direction of jet
+        this.model?.position.set(position.x, position.y - 0.15, position.z); //update model with rigidbody
 
         //CAMERA
-        this.model.getWorldPosition(this.orbitTarget);
+        this.model?.getWorldPosition(this.orbitTarget);
         this.orbitControls.target = this.orbitTarget.add(new Three.Vector3(0, this.lookDir.y + 1,0))
 
         //move 
         this.move(keysPressed, mouse);
 
-        //shot
-        if (keysPressed[MOUSE1]) this.shoot;
+        //shoot
+        if (keysPressed[Q]) this.shoot(delta);
     }
 
 
     private move(keysPressed: any, mouse: Three.Vector2)
     {         
+        if (!this.rigidBody || !this.model) return;
+
+
         const currentVelocity: number = this.magnitude(this.rigidBody.linvel());
         this.velocityToSet = currentVelocity;
 
@@ -118,29 +193,25 @@ export class Jet{
     {
       if (keysPressed[SPACE] == true)
         {
-            this.model.rotateOnAxis(this.xAxis, -0.01);
+            this.model?.rotateOnAxis(this.xAxis, -0.01);
         } else{
             if (mouse.y >1 || mouse.y < -1)
             {
-                this.model.rotateOnAxis(this.xAxis, mouse.y * -0.0007);
-                //this.cameraPivot?.rotateOnAxis(this.xAxis, mouse.y * -0.0007);
+                this.model?.rotateOnAxis(this.xAxis, mouse.y * -0.0007);
             } 
         }
         //ROLL
         if (mouse.x >1 || mouse.x < -1)
         {
-            this.model.rotateOnAxis(this.zAxis,mouse.x * 0.0007);
-            //this.cameraPivot?.rotateOnAxis(this.zAxis,-mouse.x * 0.0007);
+            this.model?.rotateOnAxis(this.zAxis,mouse.x * 0.0007);
         }
         //YAW
         if (keysPressed[A] == true)
         {
-            this.model.rotateOnAxis(this.yAxis, 0.007)
-            //this.cameraPivot?.rotateOnAxis(this.yAxis, 0.007);
+            this.model?.rotateOnAxis(this.yAxis, 0.007)
         } else if (keysPressed[D] == true)
         {
-            this.model.rotateOnAxis(this.yAxis, -0.007)
-            //this.cameraPivot?.rotateOnAxis(this.yAxis, -0.007);
+            this.model?.rotateOnAxis(this.yAxis, -0.007)
         }
     }
 
@@ -150,32 +221,32 @@ export class Jet{
         //PITCH
         if (keysPressed[S] || keysPressed[SPACE])
         {
-            this.model.rotateOnAxis(this.xAxis, -0.02);
+            this.model?.rotateOnAxis(this.xAxis, -0.02);
 
         }
         if (keysPressed[W])
         {
-            this.model.rotateOnAxis(this.xAxis, 0.02);
+            this.model?.rotateOnAxis(this.xAxis, 0.02);
 
         }
         //ROLL
         if (keysPressed[A])
         {
-            this.model.rotateOnAxis(this.zAxis, -0.04);
+            this.model?.rotateOnAxis(this.zAxis, -0.04);
 
         }
         if (keysPressed[D])
         {
-            this.model.rotateOnAxis(this.zAxis, 0.04);
+            this.model?.rotateOnAxis(this.zAxis, 0.04);
 
         }        
         //YAW
         if (keysPressed[Q] == true)
         {
-            this.model.rotateOnAxis(this.yAxis, 0.007)
+            this.model?.rotateOnAxis(this.yAxis, 0.007)
         } else if (keysPressed[E] == true)
         {
-            this.model.rotateOnAxis(this.yAxis, -0.007)
+            this.model?.rotateOnAxis(this.yAxis, -0.007)
         }
     }
 
@@ -186,6 +257,8 @@ export class Jet{
 
     private animate(delta: number, keysPressed: any)
     {
+        if (!this.animationsMap || !this.currentAction) return;
+
         var play = "";
 
         if (keysPressed["w"] == true && keysPressed["shift"] == true)
@@ -211,13 +284,50 @@ export class Jet{
             this.currentAction = play;
         }
 
-        this.mixer.update(delta);
+        this.mixer?.update(delta);
     }
     
-    private shoot()
-    {
-        
+    private shoot(delta: number)
+    {       
+        if (!this.model || !this.world) return;
+
+        if (this.currentCooldown > 0) //shoot cooldown, counts down from "shootCooldown" and resets on 0
+        {
+            this.currentCooldown -= delta; //FPS independent. makes sure every player shoots at same speed
+            return;
+        } else
+        {
+            this.currentCooldown = this.shootCooldown;
+        }
+
+        const bulletColliderDesc = RAPIER.ColliderDesc
+            .capsule(0.2,0.2)
+            //Spawn bullet in front of model. uses current model look direction added on current pos, extended by 20 to avoid clipping
+            .setTranslation(this.model.position.x + this.lookDir.x * 20, 
+                this.model.position.y + this.lookDir.y * 20, 
+                this.model.position.z + this.lookDir.z * 20)
+                .setActiveCollisionTypes(RAPIER.ActiveCollisionTypes.DEFAULT)
+                .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
+        let bulletRb = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()); //create dynamic/physics rigidbody
+        const collider: RAPIER.Collider = this.world.createCollider(bulletColliderDesc, bulletRb);
+        let forceDir = this.lookDir; //copying avoids changing stored direction value
+        bulletRb.addForce(forceDir.multiplyScalar(100), true);
+
+        //add to active bullets
+        this.bulletMap?.add(collider.handle);
     }
 
 
+
+    //GETTERS/SETTERS
+
+    public isActiveBullet(colliderHandle: number): boolean | undefined
+    {
+        return this.bulletMap?.has(colliderHandle);
+    }
+
+    public removeActiveBullet(colliderHandle: number)
+    {
+        this.bulletMap?.delete(colliderHandle);   
+    }
 }

@@ -5,10 +5,12 @@ import { Jet } from './jetClass';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 import { generateMap } from './map';
 import { RapierDebugRenderer } from './rapierDebugRenderer';
-import RAPIER from '@dimforge/rapier3d-compat'
-import { PointerLockControls, TrackballControls } from 'three/examples/jsm/Addons.js';
+import RAPIER, { Collider, World } from '@dimforge/rapier3d-compat'
+import { EffectComposer, OutputPass, PointerLockControls, RenderPass, TrackballControls } from 'three/examples/jsm/Addons.js';
 import { MOUSE1, W } from './utils';
 import { FirstPersonControls } from 'three/addons/controls/FirstPersonControls.js';
+import { RenderPixelatedPass } from 'three/addons/postprocessing/RenderPixelatedPass.js';
+
 
 //SCENE
 const scene = new Three.Scene();
@@ -19,15 +21,22 @@ const loader = new GLTFLoader();
 const camera = new Three.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100000); 
 const cameraPivot = new Three.Object3D();
 cameraPivot.name = "camPivot";
-camera.position.set(0, 1, -5);
+camera.position.set(0, 1, -5);  
 //RENDERER
 const renderer = new Three.WebGLRenderer();
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.shadowMap.enabled = true;
 
+document.body.appendChild(renderer.domElement);
+
+//POST-PROCCESSING 
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+composer.addPass(new RenderPixelatedPass(1, scene, camera));
+composer.addPass(new OutputPass());
 //LIGHTING
-const ambientLight = new Three.AmbientLight(0x333333);
+const ambientLight = new Three.AmbientLight(0xffffff, 1);
 scene.add(ambientLight);
 
 //CONTROLS
@@ -93,8 +102,6 @@ stats.dom.style.position = "absolute";
 stats.dom.style.left = (window.screen.width - 97).toString() + "px";
 stats.dom.style.top = "0px";
 
-
-document.body.appendChild(renderer.domElement);
 document.body.appendChild(stats.dom);
 
 ///DEBUG
@@ -115,8 +122,6 @@ import("@dimforge/rapier3d-compat").then(RAPIER => {
 
     //Rapier debug
     const rapierDebugger = new RapierDebugRenderer(scene, world);
-
-
 
 
     //MODELS
@@ -141,12 +146,21 @@ import("@dimforge/rapier3d-compat").then(RAPIER => {
             const animationsMap: Map<string, Three.AnimationAction> = new Map();
             gltfAnim.forEach((value: Three.AnimationClip) => {animationsMap.set(value.name, mixer.clipAction(value))});
 
-            jet = new Jet(jetModel ,rigidBody , mixer, animationsMap, orbitControls, camera, "Idle");
+            jet = new Jet.Builder()
+                .setWorld(world)
+                .setModel(jetModel)
+                .setRigidBody(rigidBody)
+                .setMixer(mixer)
+                .setAnimationsMap(animationsMap)
+                .setOrbitConrols(orbitControls)
+                .setCamera(camera)
+                .setCurrentAction("Idle")
+                .build();
         }
     );
 
-
-
+    //EVENTS
+    let eventQueue = new RAPIER.EventQueue(true);
 
     //MAIN GAME LOOP
     let gameLoop = () =>
@@ -160,8 +174,8 @@ import("@dimforge/rapier3d-compat").then(RAPIER => {
             jet.update(dt, keysPressed, mouse);
         }
 
-        world.forEachCollider((collider) =>{
-
+        world.forEachCollider((collider: RAPIER.Collider) =>{
+            collider.activeCollisionTypes
         });
 
         orbitControls.update();
@@ -170,7 +184,45 @@ import("@dimforge/rapier3d-compat").then(RAPIER => {
         stats.end();
         rapierDebugger.update();
 
-        renderer.render(scene, camera);
+        //EVENTS
+        world.step(eventQueue);
+        eventQueue.drainCollisionEvents((handle1, handle2, started)=>{ 
+            let isBullet1: boolean | undefined = jet.isActiveBullet(handle1);
+            let isBullet2: boolean | undefined = jet.isActiveBullet(handle2);
+            console.log("runs")
+            //This part removes bullet collider/rb from world 
+            if (!isBullet1 && !isBullet2) return; //environmental collision, not bullet and other
+
+            if (isBullet1 && isBullet2) //bullet on bullet, rare but needs handling
+            {
+                const colliderToRemove1 = world.getCollider(handle1);
+                const colliderToRemove2 = world.getCollider(handle2);
+
+
+                world.removeCollider(colliderToRemove1,true)
+                world.removeRigidBody(world.getRigidBody(colliderToRemove1.parent()?.handle ?? 0)); //0 = undefined
+
+                world.removeCollider(colliderToRemove2,true)
+                world.removeRigidBody(world.getRigidBody(colliderToRemove2.parent()?.handle ?? 0));
+
+            }
+            else if (isBullet1 && !isBullet2) //first collider bullet and second collider plane/other jet
+            {
+                const colliderToRemove = world.getCollider(handle1);
+                world.removeCollider(colliderToRemove,true)
+                world.removeRigidBody(world.getRigidBody(colliderToRemove.parent()?.handle ?? 0));
+                
+            }else
+            {
+                const colliderToRemove = world.getCollider(handle2);
+                world.removeCollider(colliderToRemove,true)
+                world.removeRigidBody(world.getRigidBody(colliderToRemove.parent()?.handle ?? 0));
+            }
+
+        });
+
+        //renderer.render(scene, camera);
+        composer.render();
         setTimeout(gameLoop, FPS);
     };
 

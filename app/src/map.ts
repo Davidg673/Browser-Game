@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three'
-const MAP_WIDTH = 10000;
+const MAP_WIDTH = 50000;
 let materialArray: Array<THREE.MeshBasicMaterial> = [];
 
 
@@ -50,6 +50,8 @@ function createBorder(scene: THREE.Scene, world: RAPIER.World, translation: THRE
 {
     let colliderBlueprint = RAPIER.ColliderDesc.cuboid(dimensions.x, dimensions.y, dimensions.z)
     .setTranslation(translation.x, translation.y, translation.z)
+    .setActiveCollisionTypes(RAPIER.ActiveCollisionTypes.DEFAULT)
+    .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
     world.createCollider(colliderBlueprint);
 }
 
